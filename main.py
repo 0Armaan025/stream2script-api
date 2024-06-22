@@ -7,9 +7,6 @@ from fpdf import FPDF
 import os
 
 
-# so basically I am having 3.9.2 here
-# it's 3.11.7 pyenv
-
 app = Flask(__name__)
 
 def download_video(link):
