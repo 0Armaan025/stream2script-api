@@ -6,5 +6,3 @@
 
 tasks:
   - command: python main.py
-
-
