@@ -103,25 +103,30 @@ def extract_images(video_path, interval=5):
 def create_pdf(text_chunks, image_paths, summarized_chunks=None):
     try:
         pdf = FPDF()
+        pdf.add_page()
         pdf.set_auto_page_break(auto=True, margin=15)
-        pdf.set_font("Arial", size=12)
+
+        # Add a font that supports UTF-8
+        pdf.add_font('DejaVuSans', '', 'DejaVuSans.ttf', uni=True)
+        pdf.set_font('DejaVuSans', size=12)
 
         for i, image_path in enumerate(image_paths):
             pdf.add_page()
 
             # Add header
-            pdf.set_font("Arial", "B", 16)
+            pdf.set_font("DejaVuSans", size=16)
             pdf.cell(0, 10, "Summary", 0, 1, 'C')
-            pdf.set_font("Arial", size=12)
+            pdf.set_font("DejaVuSans", size=12)
             pdf.ln(10)  # Add a line break
 
             # Add summarized content if available
             if summarized_chunks and i < len(summarized_chunks):
                 summarized_chunk = summarized_chunks[i]
-                # Limit summary to 80 words
-                summarized_chunk = ' '.join(summarized_chunk.split()[:80])
-                pdf.multi_cell(0, 10, "Summary: " + summarized_chunk)
-                pdf.ln(5)  # Add a line break after summary
+                # Limit summary to 80 words per page
+                words = summarized_chunk.split()
+                for j in range(0, len(words), 80):
+                    pdf.multi_cell(0, 10, "Summary: " + ' '.join(words[j:j+80]))
+                    pdf.ln(5)  # Add a line break after summary
 
             # Add text content
             if i < len(text_chunks):
@@ -216,7 +221,38 @@ def summarize():
     create_pdf(text_chunks, image_paths, summarized_chunks=summarized_chunks)
 
     
+    directory = os.getcwd()
 
+
+    jpg_files_exist = False
+    video_file_exists = False
+    mp3_file_exists = False
+
+    
+    files = os.listdir(directory)
+
+    
+    for file in files:
+        if file.endswith('.jpg') and file.startswith('frame_'):
+            jpg_files_exist = True
+        elif file == 'video.mp4':
+            video_file_exists = True
+        elif file == 'example.mp3':
+            mp3_file_exists = True
+
+    
+    if jpg_files_exist or video_file_exists or mp3_file_exists:
+        for file in files:
+            try:
+                file_path = os.path.join(directory, file)
+                os.remove(file_path)
+                print(f"Deleted: {file}")
+            except OSError as e:
+                print(f"Error deleting {file}: {e}")
+
+        print("Deletion process completed.")
+    else:
+        print("No relevant files found to delete.")
     return 'Summarized PDF created successfully!'
 
 if __name__ == '__main__':
