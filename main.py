@@ -1,10 +1,12 @@
 from flask import Flask
 from pytube import YouTube
-from moviepy.editor import *
-import speech_recognition as sr
+from moviepy.editor import VideoFileClip, ImageClip
+import whisper
 from pydub import AudioSegment
 from fpdf import FPDF
 import os
+import numpy
+
 
 app = Flask(__name__)
 
@@ -23,15 +25,10 @@ def convert_to_mp3(video_path):
     video.audio.write_audiofile(audio_path)
     return audio_path
 
-def get_text_from_audio_chunk(audio_chunk_path):
-    r = sr.Recognizer()
-    with sr.AudioFile(audio_chunk_path) as source:
-        audio_text = r.record(source)
-        try:
-            text = r.recognize_google(audio_text)
-        except sr.UnknownValueError:
-            text = "[Unintelligible]"
-    return text
+def get_text_from_audio(audio_path):
+    model = whisper.load_model("base")  # Choose the model size you prefer
+    result = model.transcribe(audio_path)
+    return result['text']
 
 def extract_audio_chunks(audio_path, chunk_length=5000):
     sound = AudioSegment.from_mp3(audio_path)
@@ -69,23 +66,45 @@ def create_pdf(text_chunks, image_paths):
 
     pdf.output("output.pdf")
 
+def get_video_length(video_path):
+    video = VideoFileClip(video_path)
+    duration = video.duration  # duration in seconds
+    return duration
+
 @app.route('/')
 def index():
-    video_link = 'https://www.youtube.com/watch?v=YycJFPHPw4s'
+    video_link = 'https://www.youtube.com/watch?v=xVVurVNciG4'
     download_video(video_link)
     video_path = 'video.mp4'
 
+    duration = get_video_length(video_path)
+    if duration > 20 * 60:
+        chunk_length = 120 * 1000  # 120 seconds in milliseconds
+        interval = 120  # 120 seconds
+    elif duration > 15 * 60:
+        chunk_length = 90 * 1000  # 90 seconds in milliseconds
+        interval = 90  # 90 seconds
+    elif duration > 10 * 60:
+        chunk_length = 60 * 1000  # 60 seconds in milliseconds
+        interval = 60  # 60 seconds
+    elif duration > 5 * 60:
+        chunk_length = 30 * 1000  # 30 seconds in milliseconds
+        interval = 30  # 30 seconds
+    else:
+        chunk_length = 10 * 1000  # 10 seconds in milliseconds
+        interval = 10  # 10 seconds
+
     audio_path = convert_to_mp3(video_path)
-    audio_chunks = extract_audio_chunks(audio_path, chunk_length=5000)
+    audio_chunks = extract_audio_chunks(audio_path, chunk_length=chunk_length)
 
     text_chunks = []
     for i, chunk in enumerate(audio_chunks):
         chunk_path = f"chunk_{i}.wav"
         chunk.export(chunk_path, format="wav")
-        text_chunks.append(get_text_from_audio_chunk(chunk_path))
-        os.remove(chunk_path) 
+        text_chunks.append(get_text_from_audio(chunk_path))
+        os.remove(chunk_path)  # Clean up the temporary chunk file
 
-    image_paths = extract_images(video_path, interval=5)
+    image_paths = extract_images(video_path, interval=interval)
     create_pdf(text_chunks, image_paths)
 
     return 'PDF created successfully!'
