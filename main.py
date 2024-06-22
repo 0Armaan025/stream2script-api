@@ -73,26 +73,26 @@ def get_video_length(video_path):
 
 @app.route('/')
 def index():
-    video_link = 'https://www.youtube.com/watch?v=xVVurVNciG4'
+    video_link = 'https://www.youtube.com/watch?v=2DvrRadXwWY'
     download_video(video_link)
     video_path = 'video.mp4'
 
     duration = get_video_length(video_path)
     if duration > 20 * 60:
-        chunk_length = 120 * 1000  # 120 seconds in milliseconds
+        chunk_length = 120 * 1000  
         interval = 120  # 120 seconds
     elif duration > 15 * 60:
-        chunk_length = 90 * 1000  # 90 seconds in milliseconds
-        interval = 90  # 90 seconds
+        chunk_length = 90 * 1000  
+        interval = 90  
     elif duration > 10 * 60:
-        chunk_length = 60 * 1000  # 60 seconds in milliseconds
-        interval = 60  # 60 seconds
+        chunk_length = 60 * 1000  
+        interval = 60  
     elif duration > 5 * 60:
-        chunk_length = 30 * 1000  # 30 seconds in milliseconds
-        interval = 30  # 30 seconds
+        chunk_length = 30 * 1000 
+        interval = 30 
     else:
-        chunk_length = 10 * 1000  # 10 seconds in milliseconds
-        interval = 10  # 10 seconds
+        chunk_length = 10 * 1000  
+        interval = 10 
 
     audio_path = convert_to_mp3(video_path)
     audio_chunks = extract_audio_chunks(audio_path, chunk_length=chunk_length)
@@ -102,7 +102,7 @@ def index():
         chunk_path = f"chunk_{i}.wav"
         chunk.export(chunk_path, format="wav")
         text_chunks.append(get_text_from_audio(chunk_path))
-        os.remove(chunk_path)  # Clean up the temporary chunk file
+        os.remove(chunk_path)  
 
     image_paths = extract_images(video_path, interval=interval)
     create_pdf(text_chunks, image_paths)
