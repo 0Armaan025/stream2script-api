@@ -5,8 +5,10 @@ import whisper
 from pydub import AudioSegment
 from fpdf import FPDF
 import os
-import numpy
 
+
+# so basically I am having 3.9.2 here
+# it's 3.11.7 pyenv
 
 app = Flask(__name__)
 
