@@ -8,19 +8,21 @@ import os
 import anthropic
 from dotenv import load_dotenv
 import logging
-from flask_cors import CORS 
+from flask_cors import CORS
+import tempfile
+
 
 # Load environment variables
 load_dotenv()
 
-
+# Initialize Anthropics client
 client = anthropic.Anthropic()
 
-
+# Initialize Flask app
 app = Flask(__name__)
 CORS(app)
 
-
+# Configure logging
 logging.basicConfig(level=logging.INFO)
 
 def summarize_content(content):
@@ -33,7 +35,7 @@ def summarize_content(content):
             messages=[
                 {
                     "role": "user",
-                    "content": f"Please summarize this: {content}"
+                    "content": f"Please summarize this in 500 words or less: {content}"
                 }
             ]
         )
@@ -102,43 +104,41 @@ def extract_images(video_path, interval=5):
         logging.error(f"Error in extracting images: {e}")
         return []
 
-def create_pdf(text_chunks, image_paths, summarized_chunks=None):
+def create_pdf(text_chunks, image_paths, summarized_content):
     try:
         pdf = FPDF()
         pdf.set_auto_page_break(auto=True, margin=15)
         pdf.add_font('DejaVuSans', '', 'DejaVuSans.ttf', uni=True)
         pdf.set_font('DejaVuSans', size=12)
 
-        for i, (text_chunk, image_path) in enumerate(zip(text_chunks, image_paths)):
-            pdf.add_page()
+        words_per_page = 80
+        text_pages = [text_chunks[i:i + words_per_page] for i in range(0, len(text_chunks), words_per_page)]
 
+        for i, text_page in enumerate(text_pages):
+            pdf.add_page()
             
-            if summarized_chunks and i < len(summarized_chunks):
-                summarized_chunk = summarized_chunks[i]
+            if i == 0 and summarized_content:
                 pdf.set_font("DejaVuSans", size=16)
                 pdf.cell(0, 10, "Summary", 0, 1, 'C')
                 pdf.set_font("DejaVuSans", size=12)
-                pdf.ln(10)  
+                pdf.ln(10)
+                summary_words = summarized_content.split()
+                summary_chunk = ' '.join(summary_words[:words_per_page])
+                pdf.multi_cell(0, 10, summary_chunk)
+                pdf.ln(5)
+                summarized_content = ' '.join(summary_words[words_per_page:])
 
-                
-                words = summarized_chunk.split()
-                for j in range(0, len(words), 80):
-                    pdf.multi_cell(0, 10, "Summary: " + ' '.join(words[j:j+80]))
-                    pdf.ln(5)  
-
-       
-            pdf.multi_cell(0, 10, text_chunk)
+            pdf.multi_cell(0, 10, ' '.join(text_page))
             pdf.ln(5)
 
-            
-            if os.path.exists(image_path):
-                pdf.image(image_path, x=10, y=pdf.get_y(), w=190)
-                pdf.ln(10)  
+            if i < len(image_paths):
+                pdf.image(image_paths[i], x=10, y=pdf.get_y(), w=190)
+                pdf.ln(10)
 
         output_pdf_path = "output.pdf"
         pdf.output(output_pdf_path)
         cleanup_files()
-        return output_pdf_path  
+        return output_pdf_path
     except Exception as e:
         logging.error(f"Error in creating PDF: {e}")
         return None
@@ -189,11 +189,11 @@ def get_pdf():
     for i, chunk in enumerate(audio_chunks):
         chunk_path = f"chunk_{i}.wav"
         chunk.export(chunk_path, format="wav")
-        text_chunks.append(get_text_from_audio(chunk_path))
+        text_chunks.extend(get_text_from_audio(chunk_path).split())
         os.remove(chunk_path)
 
     image_paths = extract_images(video_path, interval=interval)
-    output_pdf_path = create_pdf(text_chunks, image_paths)
+    output_pdf_path = create_pdf(text_chunks, image_paths, summarized_content="")
 
     if output_pdf_path:
         return send_file(output_pdf_path, as_attachment=True)
@@ -217,17 +217,70 @@ def summarize():
     audio_chunks = extract_audio_chunks(audio_path, chunk_length=chunk_length)
 
     text_chunks = []
-    summarized_chunks = []
     for i, chunk in enumerate(audio_chunks):
         chunk_path = f"chunk_{i}.wav"
         chunk.export(chunk_path, format="wav")
-        text = get_text_from_audio(chunk_path)
-        text_chunks.append(text)
-        summarized_chunks.append(summarize_content(text))
+        text_chunks.extend(get_text_from_audio(chunk_path).split())
         os.remove(chunk_path)
 
+    full_text = ' '.join(text_chunks)
+    summarized_content = summarize_content(full_text)[:500]
+
     image_paths = extract_images(video_path, interval=interval)
-    output_pdf_path = create_pdf(text_chunks, image_paths, summarized_chunks=summarized_chunks)
+    output_pdf_path = create_pdf(text_chunks, image_paths, summarized_content=summarized_content)
+
+    if output_pdf_path:
+        return send_file(output_pdf_path, as_attachment=True)
+    else:
+        return "Failed to generate PDF.", 500
+
+@app.route('/upload-video', methods=['POST'])
+def upload_video():
+    if 'video' not in request.files:
+        return 'No video file provided.', 400
+
+    video_file = request.files['video']
+    should_summarize = request.form.get('shouldSummarize', 'false').lower() == 'true'
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_video:
+        video_file.save(temp_video.name)
+        video_path = temp_video.name
+
+    duration = get_video_length(video_path)
+    if duration > 20 * 60:
+        chunk_length = 120 * 1000
+        interval = 120
+    elif duration > 15 * 60:
+        chunk_length = 90 * 1000
+        interval = 90
+    elif duration > 10 * 60:
+        chunk_length = 60 * 1000
+        interval = 60
+    elif duration > 5 * 60:
+        chunk_length = 30 * 1000
+        interval = 30
+    else:
+        chunk_length = 10 * 1000
+        interval = 10
+
+    audio_path = convert_to_mp3(video_path)
+    audio_chunks = extract_audio_chunks(audio_path, chunk_length=chunk_length)
+
+    text_chunks = []
+    for i, chunk in enumerate(audio_chunks):
+        chunk_path = f"chunk_{i}.wav"
+        chunk.export(chunk_path, format="wav")
+        text_chunks.extend(get_text_from_audio(chunk_path).split())
+        os.remove(chunk_path)
+
+    if should_summarize:
+        full_text = ' '.join(text_chunks)
+        summarized_content = summarize_content(full_text)[:500]
+    else:
+        summarized_content = ""
+
+    image_paths = extract_images(video_path, interval=interval)
+    output_pdf_path = create_pdf(text_chunks, image_paths, summarized_content=summarized_content)
 
     if output_pdf_path:
         return send_file(output_pdf_path, as_attachment=True)
@@ -236,26 +289,22 @@ def summarize():
 
 def cleanup_files():
     try:
-        
         for filename in os.listdir('.'):
             if filename.startswith('frame_') and filename.endswith('.jpg'):
                 os.remove(filename)
-                print(f"Deleted: {filename}")
+                logging.info(f"Deleted: {filename}")
 
-        
         if os.path.exists('example.mp3'):
             os.remove('example.mp3')
-            print("Deleted: example.mp3")
+            logging.info("Deleted: example.mp3")
 
-        
         if os.path.exists('video.mp4'):
             os.remove('video.mp4')
-            print("Deleted: video.mp4")
+            logging.info("Deleted: video.mp4")
 
-        print("Cleanup completed successfully.")
+        logging.info("Cleanup completed successfully.")
     except Exception as e:
-        print(f"Error during cleanup: {e}")
-
+        logging.error(f"Error during cleanup: {e}")
 
 if __name__ == '__main__':
     app.run(debug=True)
