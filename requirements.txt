@@ -1,0 +1,9 @@
+anthropic==0.29.0
+Flask==3.0.3
+Flask_Cors==4.0.1
+fpdf==1.7.2
+moviepy==1.0.3
+openai_whisper==20231117
+pydub==0.25.1
+python-dotenv==1.0.1
+pytube==15.0.0
