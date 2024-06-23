@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from pytube import YouTube
 from moviepy.editor import VideoFileClip, ImageClip
 import whisper
@@ -8,17 +8,19 @@ import os
 import anthropic
 from dotenv import load_dotenv
 import logging
+from flask_cors import CORS 
 
 # Load environment variables
 load_dotenv()
 
-# Initialize Anthropics client
+
 client = anthropic.Anthropic()
 
-# Initialize Flask app
-app = Flask(__name__)
 
-# Configure logging
+app = Flask(__name__)
+CORS(app)
+
+
 logging.basicConfig(level=logging.INFO)
 
 def summarize_content(content):
@@ -103,45 +105,43 @@ def extract_images(video_path, interval=5):
 def create_pdf(text_chunks, image_paths, summarized_chunks=None):
     try:
         pdf = FPDF()
-        pdf.add_page()
         pdf.set_auto_page_break(auto=True, margin=15)
-
-        # Add a font that supports UTF-8
         pdf.add_font('DejaVuSans', '', 'DejaVuSans.ttf', uni=True)
         pdf.set_font('DejaVuSans', size=12)
 
-        for i, image_path in enumerate(image_paths):
+        for i, (text_chunk, image_path) in enumerate(zip(text_chunks, image_paths)):
             pdf.add_page()
 
-            # Add header
-            pdf.set_font("DejaVuSans", size=16)
-            pdf.cell(0, 10, "Summary", 0, 1, 'C')
-            pdf.set_font("DejaVuSans", size=12)
-            pdf.ln(10)  # Add a line break
-
-            # Add summarized content if available
+            
             if summarized_chunks and i < len(summarized_chunks):
                 summarized_chunk = summarized_chunks[i]
-                # Limit summary to 80 words per page
+                pdf.set_font("DejaVuSans", size=16)
+                pdf.cell(0, 10, "Summary", 0, 1, 'C')
+                pdf.set_font("DejaVuSans", size=12)
+                pdf.ln(10)  
+
+                
                 words = summarized_chunk.split()
                 for j in range(0, len(words), 80):
                     pdf.multi_cell(0, 10, "Summary: " + ' '.join(words[j:j+80]))
-                    pdf.ln(5)  # Add a line break after summary
+                    pdf.ln(5)  
 
-            # Add text content
-            if i < len(text_chunks):
-                text_chunk = text_chunks[i]
-                pdf.multi_cell(0, 10, text_chunk)
-                pdf.ln(5)  # Add a line break after text
+       
+            pdf.multi_cell(0, 10, text_chunk)
+            pdf.ln(5)
 
-            # Add image
+            
             if os.path.exists(image_path):
                 pdf.image(image_path, x=10, y=pdf.get_y(), w=190)
-                pdf.ln(10)  # Add a line break after image
+                pdf.ln(10)  
 
-        pdf.output("output.pdf")
+        output_pdf_path = "output.pdf"
+        pdf.output(output_pdf_path)
+        cleanup_files()
+        return output_pdf_path  
     except Exception as e:
         logging.error(f"Error in creating PDF: {e}")
+        return None
 
 def get_video_length(video_path):
     try:
@@ -152,11 +152,16 @@ def get_video_length(video_path):
         logging.error(f"Error in getting video length: {e}")
         return 0
 
-
-
 @app.route('/')
 def index():
-    video_link = 'https://www.youtube.com/watch?v=CTnJyZZNOjU'
+    return 'Welcome to the Video to PDF converter!'
+
+@app.route('/get-pdf')
+def get_pdf():
+    video_link = request.args.get('video_link')
+    if not video_link:
+        return 'Please provide a YouTube video link.', 400
+    
     download_video(video_link)
     video_path = 'video.mp4'
 
@@ -188,21 +193,25 @@ def index():
         os.remove(chunk_path)
 
     image_paths = extract_images(video_path, interval=interval)
-    create_pdf(text_chunks, image_paths)
+    output_pdf_path = create_pdf(text_chunks, image_paths)
 
-    
-
-    return 'PDF created successfully!'
+    if output_pdf_path:
+        return send_file(output_pdf_path, as_attachment=True)
+    else:
+        return "Failed to generate PDF.", 500
 
 @app.route('/summarize')
 def summarize():
-    video_link = 'https://www.youtube.com/watch?v=CTnJyZZNOjU'
-    download_video(video_link)
+    youtube_url = request.args.get('video_link')
+    if not youtube_url:
+        return 'Please provide a YouTube video link.', 400
+
+    download_video(youtube_url)
     video_path = 'video.mp4'
 
     duration = get_video_length(video_path)
-    chunk_length = 2 * 60 * 1000  # 2 minutes chunks
-    interval = 2 * 60  # 2 minutes
+    chunk_length = 2 * 60 * 1000  
+    interval = 2 * 60  
 
     audio_path = convert_to_mp3(video_path)
     audio_chunks = extract_audio_chunks(audio_path, chunk_length=chunk_length)
@@ -218,42 +227,35 @@ def summarize():
         os.remove(chunk_path)
 
     image_paths = extract_images(video_path, interval=interval)
-    create_pdf(text_chunks, image_paths, summarized_chunks=summarized_chunks)
+    output_pdf_path = create_pdf(text_chunks, image_paths, summarized_chunks=summarized_chunks)
 
-    
-    directory = os.getcwd()
-
-
-    jpg_files_exist = False
-    video_file_exists = False
-    mp3_file_exists = False
-
-    
-    files = os.listdir(directory)
-
-    
-    for file in files:
-        if file.endswith('.jpg') and file.startswith('frame_'):
-            jpg_files_exist = True
-        elif file == 'video.mp4':
-            video_file_exists = True
-        elif file == 'example.mp3':
-            mp3_file_exists = True
-
-    
-    if jpg_files_exist or video_file_exists or mp3_file_exists:
-        for file in files:
-            try:
-                file_path = os.path.join(directory, file)
-                os.remove(file_path)
-                print(f"Deleted: {file}")
-            except OSError as e:
-                print(f"Error deleting {file}: {e}")
-
-        print("Deletion process completed.")
+    if output_pdf_path:
+        return send_file(output_pdf_path, as_attachment=True)
     else:
-        print("No relevant files found to delete.")
-    return 'Summarized PDF created successfully!'
+        return "Failed to generate PDF.", 500
+
+def cleanup_files():
+    try:
+        
+        for filename in os.listdir('.'):
+            if filename.startswith('frame_') and filename.endswith('.jpg'):
+                os.remove(filename)
+                print(f"Deleted: {filename}")
+
+        
+        if os.path.exists('example.mp3'):
+            os.remove('example.mp3')
+            print("Deleted: example.mp3")
+
+        
+        if os.path.exists('video.mp4'):
+            os.remove('video.mp4')
+            print("Deleted: video.mp4")
+
+        print("Cleanup completed successfully.")
+    except Exception as e:
+        print(f"Error during cleanup: {e}")
+
 
 if __name__ == '__main__':
     app.run(debug=True)
