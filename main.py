@@ -12,17 +12,17 @@ from flask_cors import CORS
 import tempfile
 
 
-# Load environment variables
+
 load_dotenv()
 
-# Initialize Anthropics client
+
 client = anthropic.Anthropic()
 
-# Initialize Flask app
-app = Flask(__name__)
-CORS(app)
 
-# Configure logging
+app = Flask(__name__)
+cors = CORS(app, resources={r"/*": {"origins": "*"}})
+
+
 logging.basicConfig(level=logging.INFO)
 
 def summarize_content(content):
@@ -156,7 +156,7 @@ def get_video_length(video_path):
 def index():
     return 'Welcome to the Video to PDF converter!'
 
-@app.route('/get-pdf')
+@app.route('/get-pdf', methods=['GET'])
 def get_pdf():
     video_link = request.args.get('video_link')
     if not video_link:
@@ -200,7 +200,7 @@ def get_pdf():
     else:
         return "Failed to generate PDF.", 500
 
-@app.route('/summarize')
+@app.route('/summarize',methods=['GET'])
 def summarize():
     youtube_url = request.args.get('video_link')
     if not youtube_url:
